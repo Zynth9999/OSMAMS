@@ -24,6 +24,8 @@ def disconnect_printer(printer):
 
 def start_mqtt(printer):
     client = bl.Printer.mqtt_start(printer)
+    printer.mqtt_client.connect()
+
     while not bl.Printer.mqtt_client_connected(printer) or not printer.mqtt_client.is_connected():
         
         time.sleep(1)
@@ -56,10 +58,29 @@ def resume_print(printer):
     printer.mqtt_client.resume_print()
 
 def unload_filament(printer):
-    printer.mqtt_client.unload_filament_spool(printer)
+    import math
+    printer.mqtt_client.set_nozzle_temperature(printer, 255) # Set nozzle to 255C to unload and load + purge filament
+    while math.floor(printer.get_nozzle_temperature()) < 240:
+        print(f'Waiting for nozzle to heat up, current temp: {math.floor(printer.get_nozzle_temperature())}°C')
+
+    if printer.mqtt_client.unload_filament_spool():
+        ok = printer.mqtt_client.unload_filament_spool()
+        print("Command sent:", ok)
+    else:
+        print("Failed to unload filament.")
+
 
 def load_filament(printer):
-    printer.mqtt_client.load_filament_spool(printer)
+    import math
+    printer.mqtt_client.set_nozzle_temperature(printer, 255) # Set nozzle to 255C to unload and load + purge filament
+    while math.floor(printer.get_nozzle_temperature()) < 240:
+        print(f'Waiting for nozzle to heat up, current temp: {math.floor(printer.get_nozzle_temperature())}°C')
+    if printer.mqtt_client.load_filament_spool():
+        ok = printer.mqtt_client.unload_filament_spool()
+        print("Command sent:", ok)
+
+    else:
+        print("Failed to unload filament.")
 
 def get_job_status(printer):
     percentage = printer.get_percentage()
