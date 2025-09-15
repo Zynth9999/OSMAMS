@@ -1,7 +1,7 @@
 import time
 import bambulabs_api as bl
 import datetime
-from bambulabs_api import PrinterMQTTClient
+from bambulabs_api import PrinterMQTTClient, mqtt_client
 
 def get_printer_status(printer):
     
@@ -10,6 +10,8 @@ def get_printer_status(printer):
 
 def connect_printer(ip, access_code, serial):
     printer = bl.Printer(ip, access_code, serial)
+
+    bl.PrinterMQTTClient.start(printer.mqtt_client)
     printer.connect()
     time.sleep(2)  # Wait for connection to establish
 
@@ -18,27 +20,46 @@ def connect_printer(ip, access_code, serial):
 
 def disconnect_printer(printer):
     printer.disconnect()
+    bl.PrinterMQTTClient.stop(printer.mqtt_client)
 
 def start_mqtt(printer):
     client = bl.Printer.mqtt_start(printer)
-    while not bl.Printer.mqtt_client_connected(printer):
+    while not bl.Printer.mqtt_client_connected(printer) or not printer.mqtt_client.is_connected():
+        
         time.sleep(1)
         print("Waiting for MQTT connection...")
+        
     print("MQTT connected!")
+    print(printer.mqtt_client.info_get_version())
     return client
     
+def blink_led(printer, num):
+    for i in range(num):
+        printer.turn_light_off()
+        time.sleep(0.25)
+        printer.turn_light_on()
+        time.sleep(0.25)
+    printer.turn_light_off()
+
+def blink_error(printer, num):
+    for i in range(num):
+        printer.turn_light_off()
+        time.sleep(0.02)
+        printer.turn_light_on()
+        time.sleep(0.2)
+    printer.turn_light_off()
 
 def get_gcode_file(printer):
     gcode_file = printer.gcode_file()
     return gcode_file
 def resume_print(printer):
-    printer.resume_print()
+    printer.mqtt_client.resume_print()
 
 def unload_filament(printer):
-    printer.unload_filament_spool()
+    printer.mqtt_client.unload_filament_spool(printer)
 
 def load_filament(printer):
-    printer.load_filament_spool()
+    printer.mqtt_client.load_filament_spool(printer)
 
 def get_job_status(printer):
     percentage = printer.get_percentage()
