@@ -1,28 +1,25 @@
-# gcode_pause_labeled.py
 import os
+import re
 
-PAUSE_COMMAND = "M400 U1"
+# Detect lines like:  M400 U1 ; C3S   or   M400 U1 ; C2E
+PAUSE_PATTERN = re.compile(r'^M400\s+U1.*;\s*C(\d)([SE])', re.IGNORECASE)
 
 def check_pauses(file_path, table):
-    pause_count = 0
     with open(file_path, "r") as file:
-        for line in file:
-            line = line.strip()
+        for raw in file:
+            line = raw.strip()
             if not line or line.startswith(";"):
                 continue
-            if PAUSE_COMMAND in line:
-                load_label = "L1" if pause_count % 2 == 0 else "L0"
-                table.append(load_label)
-                pause_count += 1
-
-
+            m = PAUSE_PATTERN.search(line)
+            if m:
+                num = int(m.group(1))       # filament 1–4
+                phase = m.group(2).upper()  # S or E
+                table.append((num, phase))
 
 def get_pause_table():
     folder = os.getcwd()
     pause_table = []
-
     for filename in os.listdir(folder):
         if filename.lower().endswith(".gcode"):
             check_pauses(os.path.join(folder, filename), pause_table)
-
     return pause_table

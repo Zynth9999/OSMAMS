@@ -13,7 +13,6 @@ def connect_printer(ip, access_code, serial):
 
     bl.PrinterMQTTClient.start(printer.mqtt_client)
     printer.connect()
-    time.sleep(2)  # Wait for connection to establish
 
     return printer
 
@@ -28,13 +27,42 @@ def start_mqtt(printer):
 
     while not bl.Printer.mqtt_client_connected(printer) or not printer.mqtt_client.is_connected():
         
-        time.sleep(1)
+        time.sleep(2.5)
         print("Waiting for MQTT connection...")
         
     print("MQTT connected!")
     print(printer.mqtt_client.info_get_version())
     return client
     
+
+wipeandshake = """; === WIPE & SHAKE / PURGE SEQUENCE ===
+; Initial purge & wipe sections
+M400
+M106 P1 S178
+M400 S3
+G1 X-3.5 F18000
+G1 X-13.5 F3000
+G1 X-3.5 F18000
+G1 X-13.5 F3000
+G1 X-3.5 F18000
+G1 X-13.5 F3000
+M400
+M106 P1 S0
+
+; Additional wipe & shake after calibration
+M106 P1 S178
+M400 S7
+G1 X0 F18000
+G1 X-13.5 F3000
+G1 X0 F18000
+G1 X-13.5 F3000
+G1 X0 F12000
+G1 X-13.5 F3000
+G1 X0 F12000
+M400
+M106 P1 S0
+; End of wipe & shake sequence"""
+
 def blink_led(printer, num):
     for i in range(num):
         printer.turn_light_off()
@@ -57,30 +85,52 @@ def get_gcode_file(printer):
 def resume_print(printer):
     printer.mqtt_client.resume_print()
 
-def unload_filament(printer):
-    import math
-    printer.mqtt_client.set_nozzle_temperature(printer, 255) # Set nozzle to 255C to unload and load + purge filament
-    while math.floor(printer.get_nozzle_temperature()) < 240:
-        print(f'Waiting for nozzle to heat up, current temp: {math.floor(printer.get_nozzle_temperature())}°C')
+def unload_filament(printer, old_filament_e_feedrate=300):
+    """
+    Retract and remove filament from the hotend/Bowden tube.
+    old_filament_e_feedrate: mm/min feedrate for the long retract
+    """
+    nozzle_temp = printer.get_nozzle_temperature()
+    if nozzle_temp < 240:
+        printer.set_nozzle_temperature(255)
+        while printer.get_nozzle_temperature() < 240:
+            time.sleep(1)  # wait for it to heat up
 
-    if printer.mqtt_client.unload_filament_spool():
-        ok = printer.mqtt_client.unload_filament_spool()
-        print("Command sent:", ok)
-    else:
-        print("Failed to unload filament.")
+    gcode = f"""G1 X180 F18000
+                G92 E0                     ; reset extruder position
+                G1 E-5   F250              ; quick retract to relieve pressure
+                G1 E-{old_filament_e_feedrate/10:.1f} F{old_filament_e_feedrate} ; long pull to fully remove
+                G1 E-2   F150              ; slow final pull
+             """
+    printer.mqtt_client.send_gcode(gcode)
+
+    
 
 
-def load_filament(printer):
-    import math
-    printer.mqtt_client.set_nozzle_temperature(printer, 255) # Set nozzle to 255C to unload and load + purge filament
-    while math.floor(printer.get_nozzle_temperature()) < 240:
-        print(f'Waiting for nozzle to heat up, current temp: {math.floor(printer.get_nozzle_temperature())}°C')
-    if printer.mqtt_client.load_filament_spool():
-        ok = printer.mqtt_client.unload_filament_spool()
-        print("Command sent:", ok)
+def load_filament(printer, prime_length=25, prime_fast=300, prime_slow=120):
+    """
+    Feed filament into the hotend and purge a little.
+    prime_length: total mm to push in
+    prime_fast: fast feedrate (mm/min)
+    prime_slow: slow finishing feedrate (mm/min)
+    """
+    # Heat nozzle if needed
+    nozzle_temp = printer.get_nozzle_temperature()
+    if nozzle_temp < 240:
+        printer.set_nozzle_temperature(255)
+        while printer.get_nozzle_temperature() < 240:
+            time.sleep(1)  # wait for it to heat up
 
-    else:
-        print("Failed to unload filament.")
+    gcode = f"""
+                G92 E0                    ; reset extruder position
+                G1 E{prime_length - 5} F{prime_fast} ; fast feed to get filament to nozzle
+                G1 E5 F{prime_slow}                 ; slow feed to prime/purge
+             """
+    printer.mqtt_client.send_gcode(gcode)
+    # wipe and shake sequence to clean nozzle
+    printer.mqtt_client.send_gcode(wipeandshake)
+
+
 
 def get_job_status(printer):
     percentage = printer.get_percentage()
