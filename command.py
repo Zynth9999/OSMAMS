@@ -13,46 +13,9 @@ current_ams_filament = None
 keep_pushing = False
 push_thread = None
 
-def continuous_filament_push():
-    """Continuously push filament while printer is running"""
-    global ser, keep_pushing
-    
-    while keep_pushing:
-        if ser and ser.is_open:
-            try:
-                # Send a small extrusion command repeatedly
-                # Adjust the E value and delay based on your printer's needs
-                ser.write(b'G91\n')  # Relative positioning
-                ser.write(b'G1 E0.5 F60\n')  # Small extrusion
-                ser.write(b'G90\n')  # Absolute positioning
-                time.sleep(0.5)  # Adjust this delay as needed
-            except serial.SerialException:
-                # If there's an error, stop pushing
-                keep_pushing = False
-        else:
-            keep_pushing = False
 
-def start_filament_push():
-    """Start continuously pushing filament"""
-    global keep_pushing, push_thread
-    
-    if keep_pushing:
-        return  # Already pushing
-        
-    keep_pushing = True
-    push_thread = threading.Thread(target=continuous_filament_push)
-    push_thread.daemon = True
-    push_thread.start()
-    print("Started continuous filament push")
 
-def stop_filament_push():
-    """Stop continuously pushing filament"""
-    global keep_pushing
-    
-    keep_pushing = False
-    if push_thread and push_thread.is_alive():
-        push_thread.join(timeout=1.0)
-    print("Stopped continuous filament push")
+
 
 def load_filament(num, delay=15):
     """
@@ -78,13 +41,13 @@ def load_filament(num, delay=15):
 
         # Step 2: Move to target filament position
         if num == 4:
-            gcode = 'G1 X505 F300\n'
+            gcode = 'G1 X485 F300\n'
         elif num == 2:
-            gcode = 'G1 Y505 F300\n'
+            gcode = 'G1 Y485 F300\n'
         elif num == 3:
-            gcode = 'G1 Z505 F300\n'
+            gcode = 'G1 Z485 F300\n'
         elif num == 1:
-            gcode = 'G1 E505 F300\n'
+            gcode = 'G1 E485 F300\n'
         else:
             print(f"Invalid filament number: {num}")
             return False
@@ -140,13 +103,23 @@ def connect_serial(port):
         except:
             pass
     try:
+
+        #
         ser = serial.Serial(port, 115200, timeout=15)
         ser.flush()
         time.sleep(2)
         print(f"Connected to AMS board on port {port}")
+        # Zero out positions
+        ser.write(b'G92 X0 Y0 Z0 E0\n')
+        time.sleep(1)
+        #gcode = b'G1 X485 F1500\n'
+        #ser.write(gcode)
+        time.sleep(10) # Wait for filament 1 to load
         ser.write(b'M18\n')
-        gcode = 'G1 X505 F300\n'
-        ser.write(gcode.encode())
+        ser.write(b'M84\n')
+
+
+        
         print("Motors disabled.")
         current_ams_filament = None  # Reset on connection
         return ser
@@ -159,8 +132,7 @@ def connect_serial(port):
 def disconnect_serial():
     global ser, current_ams_filament, keep_pushing
     
-    stop_filament_push()
-    
+
     if ser and ser.is_open:
         try:
             ser.close()

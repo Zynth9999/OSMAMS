@@ -1,0 +1,22 @@
+{
+  "1": {
+    "color": "#FF0000",
+    "name": "Red",
+    "loaded": true
+  },
+  "2": {
+    "color": "#00FF00",
+    "name": "Green",
+    "loaded": false
+  },
+  "3": {
+    "color": "#0000FF",
+    "name": "Blue",
+    "loaded": false
+  },
+  "4": {
+    "color": "#FFFF00",
+    "name": "Yellow",
+    "loaded": false
+  }
+}

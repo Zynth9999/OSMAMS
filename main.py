@@ -6,8 +6,13 @@ from colorama import Fore, Back, Style
 import command
 import bambuapi
 import checkgcode
+from filament_manager import FilamentManager
+from web_ui import WebUI
 
 if __name__ == "__main__":
+    # Initialize filament manager
+    filament_manager = FilamentManager()
+    
     # --- Load or request printer connection details ---
     if os.path.isfile("printer_info.txt"):
         with open("printer_info.txt", "r") as f:
@@ -60,6 +65,13 @@ if __name__ == "__main__":
     status = printer.get_state()
     print(Fore.GREEN + f"Printer status: {status}" + Style.RESET_ALL)
 
+    # --- Start Web UI ---
+    web_ui = WebUI(filament_manager, command, bambuapi)
+    web_ui.set_printer(printer)
+    web_ui.start_in_thread()
+    
+    print(Fore.CYAN + "Web UI started. You can access it at http://localhost:5000" + Style.RESET_ALL)
+
     # --- Parse G-code for AMS commands ---
     pause_table = checkgcode.get_pause_table()
     if pause_table:
@@ -80,56 +92,58 @@ if __name__ == "__main__":
     print(Fore.CYAN + "Monitoring printer. Waiting for filament commands..." + Style.RESET_ALL)
 
     while True:
-        # Keepalive printer ams board
+        # Keepalive printer AMS board
         command.test_connection()
-        
+
         # Check printer state and control filament pushing
         printer_state = printer.get_state()
-        
+
         if printer_state == "RUNNING":
-            # Start pushing filament continuously while printer is running
-            command.start_filament_push()
-            
             jobStatus = bambuapi.get_job_status(printer)
             print(
                 f"Progress {jobStatus[0]}% | Layer {jobStatus[1]}/{jobStatus[2]} | "
                 f"Bed {jobStatus[3]}°C | Nozzle {jobStatus[4]}°C | Remaining {jobStatus[5]} mins"
             )
-            time.sleep(30)
-        else:
-            # Stop pushing filament when printer is not running
-            command.stop_filament_push()
+            
 
-        if printer_state == "PAUSE" and pause_index < len(pause_table):
+        if printer_state == "PAUSED" or printer_state == "USER_PAUSED" or printer_state == "PAUSE":
             filament_num, phase = pause_table[pause_index]
+
+            # --- Skip the very first pause if it's "load filament 1 (C4S)" ---
+            if pause_index == 0:
+                print(Fore.YELLOW + "Skipping first pause: Load filament 1 (C4S)" + Style.RESET_ALL)
+                pause_index += 1
+                bambuapi.resume_print(printer)
+                time.sleep(2)
+                continue
+
             print(Back.YELLOW + f"Printer paused: Filament {filament_num} Phase {phase}" + Style.RESET_ALL)
 
             if phase == 'S':
-                # Get current filament from AMS and printer
+                # Get current filament from AMS and update filament manager
                 ams_filament = command.get_current_filament()
-                
                 print(f"AMS loaded: {ams_filament}, Printer loaded: ")
-                
+
                 # Unload current filament from printer
                 bambuapi.unload_filament(printer)
                 time.sleep(45)
-                
+
                 # Load new filament from AMS to printer
                 if ams_filament != filament_num:
                     command.load_filament(filament_num)
                     time.sleep(15)
-                
+
                 # Load filament into printer with specified parameters
-                if bambuapi.load_filament(printer, filament_num, 
-                                         prime_volume=45, 
-                                         flow_ratio=0.95, 
-                                         max_volumetric_speed=8):
+                if bambuapi.load_filament(printer, prime_length=25, prime_fast=300, prime_slow=120):
+                    # Update filament manager with the newly loaded filament
+                    filament_manager.set_loaded_filament(filament_num)
                     print(Fore.GREEN + f"Filament {filament_num} loaded with specified parameters." + Style.RESET_ALL)
                 else:
                     print(Fore.RED + f"Failed to load filament {filament_num}." + Style.RESET_ALL)
 
             elif phase == 'E':
                 bambuapi.unload_filament(printer)
+                filament_manager.set_loaded_filament(None)  # Mark as unloaded
                 print(Fore.GREEN + f"Filament {filament_num} unloaded." + Style.RESET_ALL)
 
             pause_index += 1

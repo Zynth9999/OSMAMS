@@ -1,0 +1,4 @@
+colorama
+bambulabs_api
+pyserial
+flask
